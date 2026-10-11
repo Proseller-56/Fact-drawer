@@ -939,10 +939,10 @@
       <div class="gate-card">
         <div class="icon">&#128100;</div>
         <h2>You must log in</h2>
-        <p>Sign in to add facts and see what you've submitted or liked.</p>
+        <p>Anyone can add or report facts. Sign in to track your submissions and activity.</p>
         <div class="field">
-          <label for="signin-username">Email address</label>
-          <input class="input" id="signin-username" type="email" placeholder="you@example.com" autocomplete="username" required>
+          <label for="signin-username">Username</label>
+          <input class="input" id="signin-username" type="text" placeholder="3–24 letters, numbers, or underscores" autocomplete="username" minlength="3" maxlength="24" required>
         </div>
         <div class="field">
           <label for="signin-password">Password</label>
@@ -950,7 +950,7 @@
         </div>
         <button class="btn btn-primary btn-block" id="signinSubmitBtn" type="button">Sign in</button>
         <button class="btn btn-outline btn-block" id="createAccountBtn" type="button" style="margin-top:8px;">Create account</button>
-        <p class="hint" style="margin-top:12px;">Use your Firebase email and password. Create an account first if you are new. Passwords are handled by Firebase Authentication.</p>
+        <p class="hint" style="margin-top:12px;">Use a username and password. Passwords are handled by Firebase Authentication; usernames are registered securely on the server.</p>
       </div>
     </section>
 
@@ -1188,8 +1188,8 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-import { getFirestore, collection, doc, getDocs, setDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
 (function () {
   "use strict";
@@ -1832,23 +1832,16 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
   }
 
   /* ---------- Report (shared by card menu + detail sheet) ---------- */
-  function reportFact(factId) {
+  async function reportFact(factId) {
     const f = facts.find(function (x) { return x.factId === factId; });
     if (!f) return;
-
-    f.reportCount += 1;
-    let flagged = false;
-    if (f.reportCount >= REPORT_THRESHOLD && f.status === "Approved") {
-      f.status = "Under Review";
-      flagged = true;
+    try {
+      await invoke("reportFact", { factId: f.factId, reason: "Inappropriate" });
+      if (activeFactId === factId) closeSheet();
+      toast("Report recorded — thanks for helping keep the drawer accurate.");
+    } catch (e) {
+      toast(e.code === "functions/already-exists" ? "You've already reported this fact." : (e.message || "Report could not be sent."));
     }
-
-    sendToServer({ action: "reportFact", factId: f.factId, reason: "Inappropriate" });
-    persistLocal();
-
-    if (activeFactId === factId) closeSheet();
-    renderAll();
-    toast(flagged ? "This fact has been pulled for review." : "Report recorded — thanks for keeping the drawer accurate.");
   }
 
   function updateDrawerCount(rangeStart, rangeEnd, total) {
@@ -1970,13 +1963,7 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
   }
 
   document.getElementById("addFactSubmitBtn").addEventListener("click", function () {
-    if (!isSignedIn()) {
-      pendingReturnTab = "add";
-      switchTab("signin");
-      return;
-    }
-
-    if (isUserBanned(currentUser.username)) {
+    if (currentUser && isUserBanned(currentUser.username)) {
       toast("This account is banned from adding facts.");
       return;
     }
@@ -2025,7 +2012,7 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
       factExplanation: explanation,
       category: category,
       source: source,
-      submittedBy: currentUser.username, // visible to admin only — see renderAdmin
+      submittedBy: currentUser ? currentUser.username : "Guest", // guest submissions are allowed
       status: "Approved",
       reportCount: 0,
       likeCount: 0,
@@ -2033,23 +2020,31 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
       saveCount: 0
     };
 
+    const submitButton = document.getElementById("addFactSubmitBtn");
+    submitButton.disabled = true;
+    submitButton.textContent = "Publishing…";
     invoke("addFact", { factId: newFact.factId, factTitle: newFact.factTitle, factExplanation: newFact.factExplanation, category: newFact.category, source: newFact.source }).then(function (saved) {
-      if (!saved || saved.error) { toast((saved && saved.error) || "Fact was not saved."); return; }
-      facts = facts.filter(f => f.factId !== newFact.factId); facts.push(Object.assign({}, newFact, saved.fact || {}));
-      mySubmittedIds.add(newFact.factId); persistLocal(); renderAll(); toast("Fact published!");
-    }).catch(function (e) { toast(e.message || "Fact could not be saved to Firebase."); });
-
-    clearFieldErrors();
-    document.getElementById("addForm").reset();
-    document.getElementById("f-category-custom-wrap").hidden = true;
-    currentFilter = "All";
-    currentPage = Number.MAX_SAFE_INTEGER; // renderFeed clamps this down to the real last page
-    searchQuery = "";
-    document.getElementById("searchInput").value = "";
-    renderAll();
-    switchTab("discover");
-    // Server confirmation above controls whether this fact is persisted.
-    openSheet(newFact.factId);
+      if (!saved || saved.error || !saved.fact) { toast((saved && saved.error) || "Fact was not saved."); return; }
+      facts = facts.filter(f => f.factId !== newFact.factId); facts.push(Object.assign({}, newFact, saved.fact));
+      if (currentUser) mySubmittedIds.add(newFact.factId);
+      persistLocal();
+      clearFieldErrors();
+      document.getElementById("addForm").reset();
+      document.getElementById("f-category-custom-wrap").hidden = true;
+      currentFilter = "All";
+      currentPage = Number.MAX_SAFE_INTEGER;
+      searchQuery = "";
+      document.getElementById("searchInput").value = "";
+      renderAll();
+      switchTab("discover");
+      openSheet(newFact.factId);
+      toast("Fact published!");
+    }).catch(function (e) {
+      toast(e.message || "Fact could not be saved to Firebase.");
+    }).finally(function () {
+      submitButton.disabled = false;
+      submitButton.textContent = "Publish to the drawer";
+    });
   });
 
   /* ============================================================
@@ -2267,21 +2262,30 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
   async function firebaseSignIn(createAccount) {
     const userField = document.getElementById("signin-username");
     const passField = document.getElementById("signin-password");
-    const email = userField.value.trim().toLowerCase(); const password = passField.value;
-    if (!email || !password) { toast("Enter your email and password."); return; }
+    const username = userField.value.trim();
+    const normalized = username.toLowerCase();
+    const password = passField.value;
+    if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) { toast("Username must be 3–24 characters using letters, numbers, or underscores."); return; }
+    if (!password || password.length < 8) { toast("Enter a password with at least 8 characters."); return; }
+    const internalEmail = normalized + "@accounts.factdrawer.invalid";
     try {
       let credential;
       if (createAccount) {
-        credential = await createUserWithEmailAndPassword(auth, email, password);
-        const suggested = email.split("@")[0].replace(/[^a-zA-Z0-9_-]/g, "").slice(0,30) || "member";
-        await updateProfile(credential.user, { displayName: suggested });
-        await setDoc(doc(db, "users", credential.user.uid), { username: suggested, createdAt: new Date().toISOString() });
-      } else credential = await signInWithEmailAndPassword(auth, email, password);
-      currentUser = { username: credential.user.displayName || email.split("@")[0], uid: credential.user.uid, email };
+        const result = await invoke("createUsernameAccount", { username: username, password: password });
+        credential = await signInWithEmailAndPassword(auth, result.email || internalEmail, password);
+      } else {
+        credential = await signInWithEmailAndPassword(auth, internalEmail, password);
+      }
+      currentUser = { username: credential.user.displayName || username, uid: credential.user.uid, email: credential.user.email };
       userField.value = ""; passField.value = "";
       const dest = pendingReturnTab || "settings"; pendingReturnTab = null;
       renderAll(); switchTab(dest); toast(createAccount ? "Account created." : "Signed in.");
-    } catch (e) { toast(e.code === "auth/email-already-in-use" ? "That email already has an account. Sign in instead." : (e.message || "Authentication failed.")); }
+    } catch (e) {
+      passField.value = "";
+      if (e.code === "functions/already-exists" || e.code === "auth/email-already-in-use") toast("That username is already taken.");
+      else if (e.code === "auth/invalid-credential" || e.code === "auth/user-not-found" || e.code === "auth/wrong-password") toast("Incorrect username or password.");
+      else toast(e.message || "Authentication failed.");
+    }
   }
   document.getElementById("signinSubmitBtn").addEventListener("click", () => firebaseSignIn(false));
   document.getElementById("createAccountBtn").addEventListener("click", () => firebaseSignIn(true));
@@ -2308,7 +2312,7 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
      TABS
   ============================================================ */
   function switchTab(tab) {
-    if ((tab === "add" || tab === "mine") && !isSignedIn()) {
+    if (tab === "mine" && !isSignedIn()) {
       pendingReturnTab = tab;
       tab = "signin";
     }
