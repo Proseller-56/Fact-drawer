@@ -1197,15 +1197,23 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
      CONFIG
   ============================================================ */
   const firebaseConfig = {
-    apiKey: "AIzaSyDB-dpSko7tVzk5GNEIBh1-wp4qzkfJyNU",
-    authDomain: "trackipedia-tm2020.firebaseapp.com",
-    databaseURL: "https://trackipedia-tm2020-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "trackipedia-tm2020",
-    storageBucket: "trackipedia-tm2020.firebasestorage.app",
-    messagingSenderId: "886423714229",
-    appId: "1:886423714229:web:2fe29af5b6aa1b53c941fc",
-    measurementId: "G-RJWZPZ9K5J"
-  };
+
+  apiKey: "AIzaSyCSfsGzUeKctr3mSY-mf9s8ehAzJkLytnY",
+
+  authDomain: "fact-drawer.firebaseapp.com",
+
+  projectId: "fact-drawer",
+
+  storageBucket: "fact-drawer.firebasestorage.app",
+
+  messagingSenderId: "231154714686",
+
+  appId: "1:231154714686:web:ccb30e036f5dee9ef3a96f",
+
+  measurementId: "G-KEJKHJVL3P"
+
+};
+
   const firebaseApp = initializeApp(firebaseConfig);
   const auth = getAuth(firebaseApp);
   const db = getFirestore(firebaseApp);
@@ -1288,7 +1296,7 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
 
   isAdmin = false;
   try {
-    const s = localStorage.getItem("factDrawerSaved");
+    const s = localStorage.getItem("fact  DrawerSaved");
     if (s) savedIds = new Set(JSON.parse(s));
     const v = localStorage.getItem("factDrawerVotes");
     if (v) voteMap = JSON.parse(v);
