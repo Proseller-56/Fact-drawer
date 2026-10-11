@@ -1196,7 +1196,7 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
   /* ============================================================
      CONFIG
   ============================================================ */
-  const firebaseConfig = {
+const firebaseConfig = {
 
   apiKey: "AIzaSyCSfsGzUeKctr3mSY-mf9s8ehAzJkLytnY",
 
@@ -1390,16 +1390,33 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
     renderAdmin();
     if (message) toast(message);
   }
+  function normalizeFirestoreFact(d) {
+    const data = d.data();
+    return Object.assign({
+      factId: d.id,
+      accessionNumber: 0,
+      factTitle: "Untitled fact",
+      factExplanation: "",
+      category: "General Trivia",
+      source: "",
+      status: "Approved",
+      reportCount: 0,
+      likeCount: 0,
+      dislikeCount: 0,
+      saveCount: 0
+    }, data, { factId: data.factId || d.id });
+  }
+
   async function syncFromServer() {
     try {
       const snap = await getDocs(query(collection(db, "Factdrawer"), orderBy("accessionNumber", "asc")));
-      facts = snap.docs.map(d => Object.assign({ factId: d.id }, d.data()));
+      facts = snap.docs.map(normalizeFirestoreFact);
       persistLocal();
       renderAll();
     } catch (e) { console.error("Fact Drawer Firestore sync failed:", e); toast("Couldn't sync facts. Check Firestore rules and deployment."); }
   }
   onSnapshot(collection(db, "Factdrawer"), function (snap) {
-    facts = snap.docs.map(d => Object.assign({ factId: d.id }, d.data())).sort((a,b) => (a.accessionNumber||0)-(b.accessionNumber||0));
+    facts = snap.docs.map(normalizeFirestoreFact).sort((a,b) => (a.accessionNumber||0)-(b.accessionNumber||0));
     persistLocal(); renderAll();
   }, function (e) { console.error("Firestore listener:", e); });
   onAuthStateChanged(auth, async function (user) {
@@ -1835,13 +1852,15 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
   async function reportFact(factId) {
     const f = facts.find(function (x) { return x.factId === factId; });
     if (!f) return;
+    if (!auth.currentUser) { toast("Please sign in before reporting a fact."); return; }
     try {
-      await setDoc(doc(db, "reports", makeId()), { factId: f.factId, reason: "Inappropriate", createdAt: serverTimestamp(), reporterUid: auth.currentUser ? auth.currentUser.uid : null });
-      await updateDoc(doc(db, "Factdrawer", f.factId), { reportCount: increment(1), status: (Number(f.reportCount || 0) + 1 >= REPORT_THRESHOLD ? "Under Review" : f.status) });
+      // Reports are stored separately. The public client must not directly change
+      // reportCount or status on a fact; those are privileged moderation fields.
+      await setDoc(doc(db, "reports", makeId()), { factId: f.factId, reason: "Inappropriate", createdAt: serverTimestamp(), reporterUid: auth.currentUser.uid });
       if (activeFactId === factId) closeSheet();
       toast("Report recorded — thanks for helping keep the drawer accurate.");
     } catch (e) {
-      toast(e.code === "functions/already-exists" ? "You've already reported this fact." : (e.message || "Report could not be sent."));
+      toast(e.message || "Report could not be sent.");
     }
   }
 
