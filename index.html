@@ -1296,7 +1296,7 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
 
   isAdmin = false;
   try {
-    const s = localStorage.getItem("fact  DrawerSaved");
+    const s = localStorage.getItem("factDrawerSaved");
     if (s) savedIds = new Set(JSON.parse(s));
     const v = localStorage.getItem("factDrawerVotes");
     if (v) voteMap = JSON.parse(v);
