@@ -941,8 +941,8 @@
         <h2>You must log in</h2>
         <p>Anyone can add or report facts. Sign in to track your submissions and activity.</p>
         <div class="field">
-          <label for="signin-username">Username</label>
-          <input class="input" id="signin-username" type="text" placeholder="3–24 letters, numbers, or underscores" autocomplete="username" minlength="3" maxlength="24" required>
+          <label for="signin-username">Email address</label>
+          <input class="input" id="signin-username" type="email" placeholder="you@example.com" autocomplete="email" required>
         </div>
         <div class="field">
           <label for="signin-password">Password</label>
@@ -950,7 +950,7 @@
         </div>
         <button class="btn btn-primary btn-block" id="signinSubmitBtn" type="button">Sign in</button>
         <button class="btn btn-outline btn-block" id="createAccountBtn" type="button" style="margin-top:8px;">Create account</button>
-        <p class="hint" style="margin-top:12px;">Use a username and password. Passwords are handled by Firebase Authentication; usernames are registered securely on the server.</p>
+        <p class="hint" style="margin-top:12px;">Use your email address and password. Accounts are managed by Firebase Authentication.</p>
       </div>
     </section>
 
@@ -974,13 +974,13 @@
       <div id="adminPanel" hidden>
         <div class="section-head">
           <h2>Under review</h2>
-          <p>These were pulled from the public feed after five or more reports. Approve to restore them, or delete for good.</p>
+          <p>Review newly submitted or reported facts. Approve to publish them, or mark them deleted.</p>
         </div>
         <div id="adminList"></div>
 
         <div class="section-head" style="margin-top:28px;">
           <h2>Banned users</h2>
-          <p>Banned usernames can't publish new facts. This only applies on this device/browser — see the note under the list.</p>
+          <p>Local reminder list only; without a server, bans cannot securely block submissions.</p>
         </div>
         <div class="field" style="display:flex;gap:8px;align-items:flex-end;">
           <div style="flex:1;">
@@ -990,7 +990,7 @@
           <button class="btn btn-danger-outline btn-sm" id="banUserBtn" type="button" style="margin-bottom:2px;">Ban</button>
         </div>
         <div id="bannedUsersList"></div>
-        <p class="plan-fine">Bans are checked by Cloud Functions before submissions are written.</p>
+        <p class="plan-fine">Database-only mode cannot securely enforce bans; remove abusive submissions manually.</p>
       </div>
     </section>
 
@@ -1188,9 +1188,8 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, setDoc, updateDoc, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 (function () {
   "use strict";
 
@@ -1210,8 +1209,7 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
   const firebaseApp = initializeApp(firebaseConfig);
   const auth = getAuth(firebaseApp);
   const db = getFirestore(firebaseApp);
-  const functions = getFunctions(firebaseApp, "europe-west1");
-  const invoke = (name, data) => httpsCallable(functions, name)(data || {}).then(r => r.data);
+
   // There is deliberately no admin password or hash anywhere in this file. The
   // password lives only on the server (see fact-drawer-backend.gs), which is the
   // only thing that can ever confirm a login or approve an admin action. Without
@@ -1357,30 +1355,24 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
     });
   try { localStorage.setItem("factDrawerFacts", JSON.stringify(facts)); } catch (e) { /* no-op */ }
 
-  /* ============================================================
-     FIREBASE SYNC — facts are read from Firestore; all writes go through
-     callable Cloud Functions so client rules cannot be bypassed.
-  ============================================================ */
+  /* DATABASE-ONLY FIREBASE SYNC: no Cloud Functions required. */
   function backendReady() { return true; }
   function sendToServer(payload) {
-    if (!payload || !payload.action) return Promise.resolve(null);
-    const map = { voteFact: "voteFact", reportFact: "reportFact", addFact: "addFact" };
-    const name = map[payload.action];
-    if (!name) return Promise.resolve(null);
-    return invoke(name, payload).catch(function (e) { toast(e.message || "Firebase request failed."); return null; });
+    // Votes are intentionally device-local in database-only mode.
+    return Promise.resolve(null);
   }
-  function postToServer(payload) {
-    if (payload && payload.action === "adminLogin") return Promise.reject(new Error("Use your Firebase admin email and password."));
-    return invoke(payload.action, payload);
-  }
-  function callAdminAction(action, extra) {
-    const map = { adminApprove: "adminApprove", adminDelete: "adminDelete", adminBanUser: "adminBanUser", adminUnbanUser: "adminUnbanUser", adminGetBanned: "adminGetBanned" };
-    if (!map[action]) { toast("Unknown curator action."); return Promise.resolve(null); }
-    return invoke(map[action], extra || {}).catch(function (e) {
-      if (e.code === "functions/unauthenticated" || e.code === "functions/permission-denied") signOutAdmin("Curator access denied. Sign in with an authorized curator account.");
-      else toast(e.message || "Couldn't reach Firebase.");
+  function postToServer(payload) { return Promise.reject(new Error("This action is unavailable in database-only mode.")); }
+  async function callAdminAction(action, extra) {
+    if (!isAdmin || !auth.currentUser) { toast("Sign in with an authorized curator account."); return null; }
+    try {
+      const id = extra && extra.factId;
+      if (action === "adminApprove" && id) { await updateDoc(doc(db, "facts", id), {status:"Approved", reportCount:0}); return {ok:true}; }
+      if (action === "adminDelete" && id) { await updateDoc(doc(db, "facts", id), {status:"Deleted"}); return {ok:true}; }
+      if (action === "adminGetBanned") return {bannedUsers:Array.from(bannedUsers)};
+      if (action === "adminBanUser" && extra.username) { bannedUsers.add(extra.username); persistLocal(); return {bannedUsers:Array.from(bannedUsers)}; }
+      if (action === "adminUnbanUser" && extra.username) { bannedUsers.delete(extra.username); persistLocal(); return {bannedUsers:Array.from(bannedUsers)}; }
       return null;
-    });
+    } catch(e) { toast(e.message || "Curator action failed. Check Firestore rules."); return null; }
   }
   function signOutAdmin(message) {
     isAdmin = false;
@@ -1836,7 +1828,8 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
     const f = facts.find(function (x) { return x.factId === factId; });
     if (!f) return;
     try {
-      await invoke("reportFact", { factId: f.factId, reason: "Inappropriate" });
+      await setDoc(doc(db, "reports", makeId()), { factId: f.factId, reason: "Inappropriate", createdAt: serverTimestamp(), reporterUid: auth.currentUser ? auth.currentUser.uid : null });
+      await updateDoc(doc(db, "facts", f.factId), { reportCount: increment(1), status: (Number(f.reportCount || 0) + 1 >= REPORT_THRESHOLD ? "Under Review" : f.status) });
       if (activeFactId === factId) closeSheet();
       toast("Report recorded — thanks for helping keep the drawer accurate.");
     } catch (e) {
@@ -2023,9 +2016,9 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
     const submitButton = document.getElementById("addFactSubmitBtn");
     submitButton.disabled = true;
     submitButton.textContent = "Publishing…";
-    invoke("addFact", { factId: newFact.factId, factTitle: newFact.factTitle, factExplanation: newFact.factExplanation, category: newFact.category, source: newFact.source }).then(function (saved) {
-      if (!saved || saved.error || !saved.fact) { toast((saved && saved.error) || "Fact was not saved."); return; }
-      facts = facts.filter(f => f.factId !== newFact.factId); facts.push(Object.assign({}, newFact, saved.fact));
+    setDoc(doc(db, "facts", newFact.factId), Object.assign({}, newFact, {status:"Under Review", createdAt:serverTimestamp()})).then(function () {
+      newFact.status = "Under Review";
+      facts = facts.filter(f => f.factId !== newFact.factId); facts.push(newFact);
       if (currentUser) mySubmittedIds.add(newFact.factId);
       persistLocal();
       clearFieldErrors();
@@ -2038,7 +2031,7 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
       renderAll();
       switchTab("discover");
       openSheet(newFact.factId);
-      toast("Fact published!");
+      toast("Fact submitted for curator review.");
     }).catch(function (e) {
       toast(e.message || "Fact could not be saved to Firebase.");
     }).finally(function () {
@@ -2115,7 +2108,7 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
           if (f) f.status = "Deleted";
           persistLocal();
           renderAll();
-          toast("Fact deleted permanently.");
+          toast("Fact marked as deleted.");
         });
       });
     }
@@ -2260,30 +2253,25 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
   });
 
   async function firebaseSignIn(createAccount) {
-    const userField = document.getElementById("signin-username");
-    const passField = document.getElementById("signin-password");
-    const username = userField.value.trim();
-    const normalized = username.toLowerCase();
-    const password = passField.value;
-    if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) { toast("Username must be 3–24 characters using letters, numbers, or underscores."); return; }
+    const userField = document.getElementById("signin-username"), passField = document.getElementById("signin-password");
+    const email = userField.value.trim().toLowerCase(), password = passField.value;
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Enter a valid email address."); return; }
     if (!password || password.length < 8) { toast("Enter a password with at least 8 characters."); return; }
-    const internalEmail = normalized + "@accounts.factdrawer.invalid";
     try {
       let credential;
       if (createAccount) {
-        const result = await invoke("createUsernameAccount", { username: username, password: password });
-        credential = await signInWithEmailAndPassword(auth, result.email || internalEmail, password);
-      } else {
-        credential = await signInWithEmailAndPassword(auth, internalEmail, password);
-      }
-      currentUser = { username: credential.user.displayName || username, uid: credential.user.uid, email: credential.user.email };
+        credential = await createUserWithEmailAndPassword(auth, email, password);
+        const displayName = email.split("@")[0].slice(0,24);
+        await updateProfile(credential.user, {displayName});
+      } else credential = await signInWithEmailAndPassword(auth, email, password);
+      currentUser = {username:credential.user.displayName || email.split("@")[0], uid:credential.user.uid, email:credential.user.email};
       userField.value = ""; passField.value = "";
       const dest = pendingReturnTab || "settings"; pendingReturnTab = null;
       renderAll(); switchTab(dest); toast(createAccount ? "Account created." : "Signed in.");
     } catch (e) {
       passField.value = "";
-      if (e.code === "functions/already-exists" || e.code === "auth/email-already-in-use") toast("That username is already taken.");
-      else if (e.code === "auth/invalid-credential" || e.code === "auth/user-not-found" || e.code === "auth/wrong-password") toast("Incorrect username or password.");
+      if (e.code === "auth/email-already-in-use") toast("An account already exists for that email.");
+      else if (e.code === "auth/invalid-credential" || e.code === "auth/user-not-found" || e.code === "auth/wrong-password") toast("Incorrect email or password.");
       else toast(e.message || "Authentication failed.");
     }
   }
