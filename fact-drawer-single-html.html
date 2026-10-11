@@ -1190,12 +1190,16 @@
   /* ============================================================
      CONFIG
   ============================================================ */
-  const SCRIPT_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL"; // Replace with your deployed Apps Script Web App URL
-  // There is deliberately no admin password or hash anywhere in this file. The
-  // password lives only on the server (see fact-drawer-backend.gs), which is the
-  // only thing that can ever confirm a login or approve an admin action. Without
-  // SCRIPT_URL pointing at a real deployment, Admin simply cannot be used — that's
-  // intentional, not a bug: there is no fallback client-side check to fall back to.
+const firebaseConfig = {
+  apiKey: "AIzaSyDB-dpSko7tVzk5GNEIBh1-wp4qzkfJyNU",
+  authDomain: "trackipedia-tm2020.firebaseapp.com",
+  databaseURL: "https://trackipedia-tm2020-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "trackipedia-tm2020",
+  storageBucket: "trackipedia-tm2020.firebasestorage.app",
+  messagingSenderId: "886423714229",
+  appId: "1:886423714229:web:2fe29af5b6aa1b53c941fc",
+  measurementId: "G-RJWZPZ9K5J"
+};
   const REPORT_THRESHOLD = 5;
   // Sent with every write to SCRIPT_URL. This is NOT a secret — it's readable in
   // view-source like everything else here. It only exists so a real backend has
