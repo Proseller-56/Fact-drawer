@@ -1366,8 +1366,8 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
     if (!isAdmin || !auth.currentUser) { toast("Sign in with an authorized curator account."); return null; }
     try {
       const id = extra && extra.factId;
-      if (action === "adminApprove" && id) { await updateDoc(doc(db, "facts", id), {status:"Approved", reportCount:0}); return {ok:true}; }
-      if (action === "adminDelete" && id) { await updateDoc(doc(db, "facts", id), {status:"Deleted"}); return {ok:true}; }
+      if (action === "adminApprove" && id) { await updateDoc(doc(db, "Factdrawer", id), {status:"Approved", reportCount:0}); return {ok:true}; }
+      if (action === "adminDelete" && id) { await updateDoc(doc(db, "Factdrawer", id), {status:"Deleted"}); return {ok:true}; }
       if (action === "adminGetBanned") return {bannedUsers:Array.from(bannedUsers)};
       if (action === "adminBanUser" && extra.username) { bannedUsers.add(extra.username); persistLocal(); return {bannedUsers:Array.from(bannedUsers)}; }
       if (action === "adminUnbanUser" && extra.username) { bannedUsers.delete(extra.username); persistLocal(); return {bannedUsers:Array.from(bannedUsers)}; }
@@ -1384,13 +1384,13 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
   }
   async function syncFromServer() {
     try {
-      const snap = await getDocs(query(collection(db, "facts"), orderBy("accessionNumber", "asc")));
+      const snap = await getDocs(query(collection(db, "Factdrawer"), orderBy("accessionNumber", "asc")));
       facts = snap.docs.map(d => Object.assign({ factId: d.id }, d.data()));
       persistLocal();
       renderAll();
     } catch (e) { console.error("Fact Drawer Firestore sync failed:", e); toast("Couldn't sync facts. Check Firestore rules and deployment."); }
   }
-  onSnapshot(collection(db, "facts"), function (snap) {
+  onSnapshot(collection(db, "Factdrawer"), function (snap) {
     facts = snap.docs.map(d => Object.assign({ factId: d.id }, d.data())).sort((a,b) => (a.accessionNumber||0)-(b.accessionNumber||0));
     persistLocal(); renderAll();
   }, function (e) { console.error("Firestore listener:", e); });
@@ -1829,7 +1829,7 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
     if (!f) return;
     try {
       await setDoc(doc(db, "reports", makeId()), { factId: f.factId, reason: "Inappropriate", createdAt: serverTimestamp(), reporterUid: auth.currentUser ? auth.currentUser.uid : null });
-      await updateDoc(doc(db, "facts", f.factId), { reportCount: increment(1), status: (Number(f.reportCount || 0) + 1 >= REPORT_THRESHOLD ? "Under Review" : f.status) });
+      await updateDoc(doc(db, "Factdrawer", f.factId), { reportCount: increment(1), status: (Number(f.reportCount || 0) + 1 >= REPORT_THRESHOLD ? "Under Review" : f.status) });
       if (activeFactId === factId) closeSheet();
       toast("Report recorded — thanks for helping keep the drawer accurate.");
     } catch (e) {
@@ -2016,7 +2016,7 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
     const submitButton = document.getElementById("addFactSubmitBtn");
     submitButton.disabled = true;
     submitButton.textContent = "Publishing…";
-    setDoc(doc(db, "facts", newFact.factId), Object.assign({}, newFact, {status:"Under Review", createdAt:serverTimestamp()})).then(function () {
+    setDoc(doc(db, "Factdrawer", newFact.factId), Object.assign({}, newFact, {status:"Under Review", createdAt:serverTimestamp()})).then(function () {
       newFact.status = "Under Review";
       facts = facts.filter(f => f.factId !== newFact.factId); facts.push(newFact);
       if (currentUser) mySubmittedIds.add(newFact.factId);
