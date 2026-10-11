@@ -941,8 +941,8 @@
         <h2>You must log in</h2>
         <p>Anyone can add or report facts. Sign in to track your submissions and activity.</p>
         <div class="field">
-          <label for="signin-username">Email address</label>
-          <input class="input" id="signin-username" type="email" placeholder="you@example.com" autocomplete="email" required>
+          <label for="signin-username">Username</label>
+          <input class="input" id="signin-username" type="text" placeholder="your_username" autocomplete="username" maxlength="24" required>
         </div>
         <div class="field">
           <label for="signin-password">Password</label>
@@ -950,7 +950,7 @@
         </div>
         <button class="btn btn-primary btn-block" id="signinSubmitBtn" type="button">Sign in</button>
         <button class="btn btn-outline btn-block" id="createAccountBtn" type="button" style="margin-top:8px;">Create account</button>
-        <p class="hint" style="margin-top:12px;">Use your email address and password. Accounts are managed by Firebase Authentication.</p>
+        <p class="hint" style="margin-top:12px;">Use a username and password. No real email address is requested or stored by Fact Drawer.</p>
       </div>
     </section>
 
@@ -963,8 +963,8 @@
           <h2>Curator access</h2>
           <p>Sign in with the Firebase account that has been granted curator access.</p>
           <div class="field">
-            <label for="admin-email">Curator email</label>
-            <input class="input" id="admin-email" type="email" placeholder="curator@example.com" autocomplete="username" style="margin-bottom:8px;">
+            <label for="admin-email">Curator username</label>
+            <input class="input" id="admin-email" type="text" placeholder="curator_username" autocomplete="username" maxlength="24" style="margin-bottom:8px;">
             <label for="admin-password">Password</label>
             <input class="input" id="admin-password" type="password" placeholder="Enter password" autocomplete="off">
           </div>
@@ -1036,7 +1036,7 @@
         <div class="settings-row">
           <div>
             <h4 style="color:var(--danger);">Delete account &amp; data</h4>
-            <p>Permanently removes your local sign-in, saved facts, votes and submission history on this device. Facts you've published stay in the shared feed, but any email you attached to them is cleared.</p>
+            <p>Permanently removes your local sign-in, saved facts, votes and submission history on this device. Facts you've published stay in the shared feed. Fact Drawer does not ask for your real email address.</p>
           </div>
           <button class="btn btn-danger-outline btn-sm" id="deleteAccountBtn" type="button">Delete</button>
         </div>
@@ -1397,7 +1397,7 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
   onAuthStateChanged(auth, async function (user) {
     if (!user) { currentUser = null; isAdmin = false; renderAll(); return; }
     const username = user.displayName || (user.email ? user.email.split("@")[0] : "member");
-    currentUser = { username: username, uid: user.uid, email: user.email };
+    currentUser = { username: username, uid: user.uid, email: null };
     try {
       const token = await user.getIdTokenResult(true);
       isAdmin = token.claims.admin === true;
@@ -2186,15 +2186,16 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
   });
 
   document.getElementById("adminEnterBtn").addEventListener("click", async function () {
-    const email = document.getElementById("admin-email").value.trim();
+    const username = document.getElementById("admin-email").value.trim().toLowerCase();
+    const email = username + "@accounts.factdrawer.invalid";
     const passInput = document.getElementById("admin-password"); const pass = passInput.value;
-    if (!email || !pass) { toast("Enter curator email and password."); return; }
+    if (!/^[a-z0-9._-]{3,24}$/.test(username) || !pass) { toast("Enter a valid curator username and password."); return; }
     try {
       const cred = await signInWithEmailAndPassword(auth, email, pass);
       const token = await cred.user.getIdTokenResult(true);
       passInput.value = "";
       if (token.claims.admin !== true) { await signOut(auth); toast("This account has not been granted curator access."); return; }
-      currentUser = { username: cred.user.displayName || email.split("@")[0], uid: cred.user.uid, email };
+      currentUser = { username: cred.user.displayName || username, uid: cred.user.uid, email: null };
       isAdmin = true; fetchBannedUsers(); renderAll(); toast("Welcome to the review room.");
     } catch (e) { passInput.value = ""; toast(e.message || "Curator sign-in failed."); }
   });
@@ -2254,24 +2255,25 @@ import { getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, set
 
   async function firebaseSignIn(createAccount) {
     const userField = document.getElementById("signin-username"), passField = document.getElementById("signin-password");
-    const email = userField.value.trim().toLowerCase(), password = passField.value;
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Enter a valid email address."); return; }
+    const username = userField.value.trim().toLowerCase(), password = passField.value;
+    if (!/^[a-z0-9._-]{3,24}$/.test(username)) { toast("Use 3–24 characters: lowercase letters, numbers, dots, underscores or hyphens."); return; }
+    const email = username + "@accounts.factdrawer.invalid";
     if (!password || password.length < 8) { toast("Enter a password with at least 8 characters."); return; }
     try {
       let credential;
       if (createAccount) {
         credential = await createUserWithEmailAndPassword(auth, email, password);
-        const displayName = email.split("@")[0].slice(0,24);
+        const displayName = username;
         await updateProfile(credential.user, {displayName});
       } else credential = await signInWithEmailAndPassword(auth, email, password);
-      currentUser = {username:credential.user.displayName || email.split("@")[0], uid:credential.user.uid, email:credential.user.email};
+      currentUser = {username:credential.user.displayName || username, uid:credential.user.uid, email:null};
       userField.value = ""; passField.value = "";
       const dest = pendingReturnTab || "settings"; pendingReturnTab = null;
       renderAll(); switchTab(dest); toast(createAccount ? "Account created." : "Signed in.");
     } catch (e) {
       passField.value = "";
-      if (e.code === "auth/email-already-in-use") toast("An account already exists for that email.");
-      else if (e.code === "auth/invalid-credential" || e.code === "auth/user-not-found" || e.code === "auth/wrong-password") toast("Incorrect email or password.");
+      if (e.code === "auth/email-already-in-use") toast("That username is already taken.");
+      else if (e.code === "auth/invalid-credential" || e.code === "auth/user-not-found" || e.code === "auth/wrong-password") toast("Incorrect username or password.");
       else toast(e.message || "Authentication failed.");
     }
   }
